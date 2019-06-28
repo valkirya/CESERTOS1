@@ -8,3 +8,13 @@ En este sistema se implementan tres tareas.
 
 Se implemento una cola para la gestión del evento de la UART.
 Se implemento un semaforo Mutex para la sincronización de las tareas, permitiendo la correcta visualización en el display en el momento que se atienda la interrupción.
+
+
+Video funcionamiento del sistema:
+
+https://drive.google.com/file/d/1-9Amvu1h6WdO6_fuQlVOz65rsVBuGTvF/view?usp=sharing
+
+Presentación:
+
+https://docs.google.com/presentation/d/15lSfBPZjVKcrZ0-47yq9x3xqZpBjO73CBf5I2vz-eYY/edit?usp=sharing
+
