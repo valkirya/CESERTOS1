@@ -36,7 +36,7 @@
 #define BUF_SIZE (1024)
 #define RD_BUF_SIZE (BUF_SIZE)
 
-/* Cola para manejar la cola */
+/* Cola para manejar el tipo de evento de la UART */
 static QueueHandle_t uart0_queue;
 
 /* Esto es requerido para manejar los eventos de la conexión Wi-FI */
