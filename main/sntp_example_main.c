@@ -1,10 +1,4 @@
-/* LwIP SNTP example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
+/* Iván camilo Aranda Casas
 */
 #include <string.h>
 #include <time.h>
@@ -24,53 +18,54 @@
 #include "i2c-lcd1602.h"
 
 
-/* The examples use simple WiFi configuration that you can set via
-   'make menuconfig'.
-
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
-
-#define I2C_MASTER_NUM           I2C_NUM_0
-#define I2C_MASTER_TX_BUF_LEN    0                     // 
-#define I2C_MASTER_RX_BUF_LEN    0                     // 
+/* Macros I2C para su configuración */
+#define I2C_MASTER_NUM           I2C_NUM_0             
+#define I2C_MASTER_TX_BUF_LEN    0                     
+#define I2C_MASTER_RX_BUF_LEN    0                    
 #define I2C_MASTER_FREQ_HZ       100000
 #define I2C_MASTER_SDA_IO        CONFIG_I2C_MASTER_SDA
 #define I2C_MASTER_SCL_IO        CONFIG_I2C_MASTER_SCL
 
+
+/* Macros para las credenciales que permitirán la conexión WI-FI */
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
 
-/*Macros de la UART*/
+/* Macros de la UART */
 #define EX_UART_NUM UART_NUM_0
 #define BUF_SIZE (1024)
 #define RD_BUF_SIZE (BUF_SIZE)
+
+/* Cola para manejar la cola */
 static QueueHandle_t uart0_queue;
 
-/* FreeRTOS event group to signal when we are connected & ready to make a request */
+/* Esto es requerido para manejar los eventos de la conexión Wi-FI */
 static EventGroupHandle_t wifi_event_group;
-
-/* The event group allows multiple bits for each event,
-   but we only care about one event - are we connected
-   to the AP with an IP? */
 const int CONNECTED_BIT = BIT0;
 
+/* Seteamos el tag para los eventos de este código */
 static const char *TAG = "CESE2019";
 
-/* Variable holding number of times ESP32 restarted since first boot.
- * It is placed into RTC memory using RTC_DATA_ATTR and
- * maintains its value when ESP32 wakes from deep sleep.
- */
+/* Prototipos de las funciones */
+
+/* Tarea para gestionar el evento de interrupción por la UART */
 static void uart_event_task(void *pvParameters);
-static void obtain_time(void *pvParameters);
-static void sync_time(void *pvParameters);
+/* Primera tarea que permite obtener hora y fecha por NTP */
+static void obtain_time_task(void *pvParameters);
+/* Segunda tarea que permite actualizar la hora  */
+static void sync_time_task(void *pvParameters);
+/* Evento que gestiona los eventos de conexión */
+static esp_err_t event_handler(void *ctx, system_event_t *event);
+
+/* Funciones de inicialización */
 static void initialize_sntp(void);
 static void initialise_wifi(void);
 static void initialise_uart(void);
-static esp_err_t event_handler(void *ctx, system_event_t *event);
- static void i2c_master_init(void);
+static void i2c_master_init(void);
 
+/*Handle para la eliminación de la tarea "sync_time_task" */
 TaskHandle_t xHandle = NULL;
+/* Mutex para la sincronización de la tarea */
 SemaphoreHandle_t xMutex;
 
 
@@ -78,36 +73,38 @@ void app_main()
 {
     i2c_master_init();
     initialise_uart();
+    /*NO SE INICIALIZA LA CONEXIÓN WI-FI YA QUE LA CONEXION NO ES PERSISTENTE*/
     xMutex = xSemaphoreCreateMutex();
-    /* Create a task obtain_time */ 
-    //Create a task to handler UART event from ISR
+    /* TASKS */ 
     xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 8, NULL);
-    xTaskCreate(sync_time, "sync_time", 4096, NULL, 4, &xHandle);
-    xTaskCreate(obtain_time, "obtain_time", 4096, NULL, 2, NULL);
+    xTaskCreate(sync_time_task, "sync_time_task", 4096, NULL, 4, &xHandle);
+    xTaskCreate(obtain_time_task, "obtain_time_task", 4096, NULL, 2, NULL);
 
 }
 
-static void obtain_time(void *pvParameters){
-    // Set up I2C
+static void obtain_time_task(void *pvParameters){
+    // Configuración de variables de I2C
     i2c_port_t i2c_num = I2C_MASTER_NUM;
     uint8_t address = CONFIG_LCD1602_I2C_ADDRESS;
 
-    // Set up the SMBus
+    
     smbus_info_t * smbus_info = smbus_malloc();
     smbus_init(smbus_info, i2c_num, address);
     smbus_set_timeout(smbus_info, 1000 / portTICK_RATE_MS);
 
-    // Set up the LCD1602 device with backlight off
+    // Reservamos un espacion en el heap que tendrá una estructura para el envío de datos a por I2C al display 16x2
     i2c_lcd1602_info_t * i2c_lcd1602_info = i2c_lcd1602_malloc();
     i2c_lcd1602_init(i2c_lcd1602_info, smbus_info, true);
 
     time_t now = 0;
     struct tm timeinfo = { 0 };
     char strftime_buf[64];
-
+    /* Limpiamos la pantalla */
     i2c_lcd1602_clear(i2c_lcd1602_info);
+    /* Seteamos la posición del cursor */
     i2c_lcd1602_set_cursor(i2c_lcd1602_info, false);
 
+    /* En caso que no tenga fecha esperaremos a que sea tomada y seteada */
     while(timeinfo.tm_year < (2019 - 1900)){
         ESP_LOGI(TAG, "Obteniendo la hora...");
         time(&now);
@@ -125,7 +122,6 @@ static void obtain_time(void *pvParameters){
         localtime_r(&now, &timeinfo);
         strftime(strftime_buf, sizeof(strftime_buf), "%H:%M:%S", &timeinfo);
         i2c_lcd1602_move_cursor(i2c_lcd1602_info, 0, 0);
-        //ESP_LOGI(TAG, "%s", strftime_buf);
         i2c_lcd1602_write_string(i2c_lcd1602_info, strftime_buf);
         strftime(strftime_buf, sizeof(strftime_buf), "%a %b %e %Y", &timeinfo);
         i2c_lcd1602_move_cursor(i2c_lcd1602_info, 0, 1);
@@ -134,14 +130,14 @@ static void obtain_time(void *pvParameters){
     }
 }
 
-static void sync_time(void *pvParameters){
+static void sync_time_task(void *pvParameters){
     nvs_flash_init();
     initialise_wifi();
     xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
                         false, true, portMAX_DELAY);
     initialize_sntp();
 
-    // wait for time to be set
+    // Esperamos a que la hora sea tomada
     time_t now = 0;
     struct tm timeinfo = { 0 };
     char strftime_buf[64];
@@ -153,15 +149,17 @@ static void sync_time(void *pvParameters){
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
     ESP_LOGI(TAG, "Hora y Fecha Actualizada para Buenos Aires: %s", strftime_buf);
     esp_wifi_stop();
-    vTaskDelay(2000 / portTICK_PERIOD_MS);    vTaskDelay(2000 / portTICK_PERIOD_MS);
-
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
     vTaskDelete( xHandle );
 }
 
 static void initialize_sntp(void){
     ESP_LOGI(TAG, "Initializing SNTP");
-    sntp_setservername(0, "pool.ntp.org");
+    /* Seteamos para que el servidor sea el local, solo para temas demostrativos en wireshark*/
+    sntp_setservername(0, "localhost");
+    /* Seteamos el modo de operación del servidor ntp*/
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    /* Inicializamos el servicio. */
     sntp_init();
 
 }
@@ -179,7 +177,7 @@ static void initialise_wifi(void){
             .password = EXAMPLE_WIFI_PASS,
         },
     };
-    ESP_LOGI(TAG, "Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
+    ESP_LOGI(TAG, "Seteando la configuración del SSID para la conexión por WIFI %s...", wifi_config.sta.ssid);
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
     esp_wifi_start();
@@ -229,7 +227,9 @@ static void initialise_uart(void){
 }
 
 static void uart_event_task(void *pvParameters){
+    /* Se comprueba que el mutex se generó correctamente */
     if (xMutex!=NULL){
+        /* Validamos si el mutex fue tomado */
         if(xSemaphoreTake(xMutex, portMAX_DELAY)==pdTRUE){
             uart_event_t event;
             uint8_t* dtmp = (uint8_t*) malloc(RD_BUF_SIZE);
@@ -242,7 +242,7 @@ static void uart_event_task(void *pvParameters){
                         other types of events. If we take too much time on data event, the queue might
                         be full.*/
                         case UART_DATA:
-                            xTaskCreate(sync_time, "sync_time", 4096, NULL, 12, &xHandle);
+                            xTaskCreate(sync_time_task, "sync_time_task", 4096, NULL, 12, &xHandle);
                             sntp_stop();
                             vTaskDelay(200 / portTICK_PERIOD_MS);
                             break;
@@ -252,8 +252,10 @@ static void uart_event_task(void *pvParameters){
                     }
                 }
             }
+        /*Liberamos la reserva de memoria en el heap*/
         free(dtmp);
         dtmp = NULL;
+        /* Liberamos el semaforo*/
         xSemaphoreGive(xMutex);
         }
     }
