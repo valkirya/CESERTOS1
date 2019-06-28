@@ -156,7 +156,7 @@ static void sync_time_task(void *pvParameters){
 static void initialize_sntp(void){
     ESP_LOGI(TAG, "Initializing SNTP");
     /* Seteamos para que el servidor sea el local, solo para temas demostrativos en wireshark*/
-    sntp_setservername(0, "localhost");
+    sntp_setservername(0, "pool.ntp.org");
     /* Seteamos el modo de operación del servidor ntp*/
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     /* Inicializamos el servicio. */
